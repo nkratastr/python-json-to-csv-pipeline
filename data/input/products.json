@@ -1,0 +1,36 @@
+{
+  "data": [
+    {
+      "product_id": "P001",
+      "product_name": "Laptop",
+      "price": 1299.99,
+      "category": "Electronics",
+      "in_stock": true,
+      "quantity": 45
+    },
+    {
+      "product_id": "P002",
+      "product_name": "Wireless Mouse",
+      "price": 29.99,
+      "category": "Accessories",
+      "in_stock": true,
+      "quantity": 150
+    },
+    {
+      "product_id": "P003",
+      "product_name": "USB-C Cable",
+      "price": 15.99,
+      "category": "Accessories",
+      "in_stock": false,
+      "quantity": 0
+    },
+    {
+      "product_id": "P004",
+      "product_name": "Mechanical Keyboard",
+      "price": 89.99,
+      "category": "Accessories",
+      "in_stock": true,
+      "quantity": 30
+    }
+  ]
+}

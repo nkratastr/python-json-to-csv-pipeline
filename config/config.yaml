@@ -1,0 +1,33 @@
+# Pipeline Configuration
+pipeline:
+  name: "JSON to CSV Pipeline"
+  version: "1.0.0"
+
+# Paths
+paths:
+  input_dir: "data/input"
+  output_dir: "data/output"
+  log_dir: "logs"
+  default_input_file: "sample.json"
+
+# Logging Configuration
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file_name: "pipeline.log"
+  max_bytes: 10485760  # 10MB
+  backup_count: 5
+
+# Data Validation
+validation:
+  strict_mode: true
+  required_fields:
+    - "id"
+    - "name"
+    - "email"
+
+# Output Configuration
+output:
+  csv_encoding: "utf-8"
+  csv_index: false
+  timestamp_suffix: true

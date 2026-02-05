@@ -1,47 +1,18 @@
 """
 Data Transformation Module
 Handles data cleaning and transformation - works with ANY JSON structure.
+Uses Polars for fast deduplication (10-100x faster than Pandas).
 """
 
 import pandas as pd
+import polars as pl
 from typing import List, Dict, Optional
 import logging
 from tqdm import tqdm
-import threading
 import time
 import sys
 
 logger = logging.getLogger(__name__)
-
-
-class Spinner:
-    """Simple spinner for long-running operations."""
-    
-    def __init__(self, message: str = "Processing"):
-        self.message = message
-        self.running = False
-        self.thread = None
-        self.frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
-        
-    def spin(self):
-        i = 0
-        while self.running:
-            sys.stdout.write(f"\r    ├─ {self.message} {self.frames[i % len(self.frames)]}")
-            sys.stdout.flush()
-            i += 1
-            time.sleep(0.1)
-    
-    def start(self):
-        self.running = True
-        self.thread = threading.Thread(target=self.spin)
-        self.thread.start()
-        
-    def stop(self, result_msg: str = "✓"):
-        self.running = False
-        if self.thread:
-            self.thread.join()
-        sys.stdout.write(f"\r    ├─ {self.message} {result_msg}          \n")
-        sys.stdout.flush()
 
 
 class DataTransformer:
@@ -84,41 +55,24 @@ class DataTransformer:
         transformed_df = df.copy()
         
         try:
-            # Drop duplicates if requested
+            # Drop duplicates if requested - using Polars for speed
             if drop_duplicates:
                 initial_count = len(transformed_df)
+                print(f"    ├─ Removing duplicates ({initial_count:,} rows)...", end=" ", flush=True)
                 
-                # Use chunked processing with progress for large datasets
-                if initial_count > 10000:
-                    chunk_size = 10000
-                    total_chunks = (initial_count + chunk_size - 1) // chunk_size
-                    
-                    print(f"    ├─ Removing duplicates ({initial_count:,} rows)")
-                    
-                    # Process in chunks with progress bar
-                    unique_df = pd.DataFrame()
-                    with tqdm(total=initial_count, desc="        Deduplicating", 
-                              unit="rows", bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]") as pbar:
-                        
-                        for start in range(0, initial_count, chunk_size):
-                            end = min(start + chunk_size, initial_count)
-                            chunk = transformed_df.iloc[start:end]
-                            
-                            # Merge with existing unique rows and dedupe
-                            unique_df = pd.concat([unique_df, chunk]).drop_duplicates()
-                            pbar.update(end - start)
-                    
-                    transformed_df = unique_df
-                    duplicates_removed = initial_count - len(transformed_df)
-                    print(f"        ✓ Removed {duplicates_removed:,} duplicates")
-                else:
-                    print(f"    ├─ Removing duplicates ({initial_count:,} rows)...", end=" ", flush=True)
-                    transformed_df = transformed_df.drop_duplicates()
-                    duplicates_removed = initial_count - len(transformed_df)
-                    print(f"✓ (removed {duplicates_removed})")
+                start_time = time.time()
+                
+                # Use Polars for fast deduplication (10-100x faster than Pandas)
+                pl_df = pl.from_pandas(transformed_df)
+                pl_unique = pl_df.unique()
+                transformed_df = pl_unique.to_pandas()
+                
+                elapsed = time.time() - start_time
+                duplicates_removed = initial_count - len(transformed_df)
+                print(f"✓ (removed {duplicates_removed:,} in {elapsed:.2f}s)")
                     
                 if duplicates_removed > 0:
-                    logger.info(f"Removed {duplicates_removed} duplicate rows")
+                    logger.info(f"Removed {duplicates_removed} duplicate rows using Polars in {elapsed:.2f}s")
             else:
                 print("    ├─ Removing duplicates... ✓ (skipped)")
             

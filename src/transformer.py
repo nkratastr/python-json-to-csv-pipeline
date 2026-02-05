@@ -87,13 +87,30 @@ class DataTransformer:
             # Drop duplicates if requested
             if drop_duplicates:
                 initial_count = len(transformed_df)
-                # Use spinner for large datasets
+                
+                # Use chunked processing with progress for large datasets
                 if initial_count > 10000:
-                    spinner = Spinner(f"Removing duplicates ({initial_count:,} rows)")
-                    spinner.start()
-                    transformed_df = transformed_df.drop_duplicates()
+                    chunk_size = 10000
+                    total_chunks = (initial_count + chunk_size - 1) // chunk_size
+                    
+                    print(f"    ├─ Removing duplicates ({initial_count:,} rows)")
+                    
+                    # Process in chunks with progress bar
+                    unique_df = pd.DataFrame()
+                    with tqdm(total=initial_count, desc="        Deduplicating", 
+                              unit="rows", bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]") as pbar:
+                        
+                        for start in range(0, initial_count, chunk_size):
+                            end = min(start + chunk_size, initial_count)
+                            chunk = transformed_df.iloc[start:end]
+                            
+                            # Merge with existing unique rows and dedupe
+                            unique_df = pd.concat([unique_df, chunk]).drop_duplicates()
+                            pbar.update(end - start)
+                    
+                    transformed_df = unique_df
                     duplicates_removed = initial_count - len(transformed_df)
-                    spinner.stop(f"✓ (removed {duplicates_removed:,})")
+                    print(f"        ✓ Removed {duplicates_removed:,} duplicates")
                 else:
                     print(f"    ├─ Removing duplicates ({initial_count:,} rows)...", end=" ", flush=True)
                     transformed_df = transformed_df.drop_duplicates()

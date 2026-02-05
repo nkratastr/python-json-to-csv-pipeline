@@ -270,42 +270,108 @@ class PreviewGenerator:
         return rows if rows else [base_row]
     
     def _extract_relational_tables(self, record: Dict) -> Dict[str, pd.DataFrame]:
-        """Extract relational tables from a record."""
+        """Extract relational tables from a record - recursively finds all nested arrays."""
         tables = {}
-        id_field = self._find_id_field(record)
-        id_value = record.get(id_field, "unknown")
         
-        # Main table - flat fields only
+        # Find root ID (could be at top level or inside wrapper like 'employee')
+        root_id_field, root_id_value = self._find_root_id(record)
+        
+        # Main table - will hold flattened non-array fields
         main_row = {}
         
+        # Recursively extract tables from nested structures
+        self._extract_tables_recursive(
+            record, 
+            tables, 
+            main_row, 
+            parent_id_field=root_id_field,
+            parent_id_value=root_id_value,
+            prefix=""
+        )
+        
+        # Insert main table first
+        tables = {"main": pd.DataFrame([main_row]), **tables}
+        return tables
+    
+    def _find_root_id(self, record: Dict) -> tuple:
+        """Find the root ID field, even if nested in wrapper object."""
+        # Check top level
+        id_field = self._find_id_field(record)
+        if id_field in record and not isinstance(record[id_field], dict):
+            return id_field, record.get(id_field, "unknown")
+        
+        # Check inside wrapper objects (like 'employee', 'data', etc.)
         for key, value in record.items():
             if isinstance(value, dict):
-                # Flatten nested object
-                for k, v in pd.json_normalize([value], sep='.').iloc[0].items():
-                    if not isinstance(v, (list, dict)):
-                        main_row[f"{key}.{k}"] = v
+                nested_id = self._find_id_field(value)
+                if nested_id in value and not isinstance(value[nested_id], dict):
+                    return nested_id, value.get(nested_id, "unknown")
+        
+        return "id", "unknown"
+    
+    def _extract_tables_recursive(self, obj: Dict, tables: Dict, main_row: Dict,
+                                   parent_id_field: str, parent_id_value: Any,
+                                   prefix: str, current_parent_ids: Dict = None):
+        """Recursively extract relational tables from nested structure."""
+        if current_parent_ids is None:
+            current_parent_ids = {parent_id_field: parent_id_value}
+        
+        for key, value in obj.items():
+            full_key = f"{prefix}.{key}" if prefix else key
+            
+            if isinstance(value, dict):
+                # Recurse into nested object
+                self._extract_tables_recursive(
+                    value, tables, main_row,
+                    parent_id_field, parent_id_value,
+                    full_key, current_parent_ids
+                )
+                
             elif isinstance(value, list) and value and isinstance(value[0], dict):
                 # Array of objects -> separate table
+                table_name = key  # Use array field name as table name
                 child_rows = []
+                
                 for item in value:
-                    child_row = {f"parent_{id_field}": id_value}
+                    child_row = {}
+                    # Add parent IDs
+                    for pid_field, pid_value in current_parent_ids.items():
+                        child_row[f"{table_name}_{pid_field}"] = pid_value
+                    
+                    # Find this item's ID
+                    item_id_field = self._find_id_field(item)
+                    item_id_value = item.get(item_id_field, "")
+                    
+                    # Process item fields
                     for k, v in item.items():
                         if isinstance(v, list) and v and isinstance(v[0], dict):
-                            # Nested array -> another table
-                            grandchild_rows = []
-                            item_id = item.get(self._find_id_field(item), "")
-                            for gitem in v:
-                                grow = {
-                                    f"parent_{id_field}": id_value,
-                                    f"parent_{self._find_id_field(item)}": item_id
-                                }
-                                for gk, gv in gitem.items():
-                                    if isinstance(gv, list):
-                                        grow[gk] = "|".join(str(x) for x in gv)
-                                    elif not isinstance(gv, dict):
-                                        grow[gk] = gv
-                                grandchild_rows.append(grow)
-                            tables[k] = pd.DataFrame(grandchild_rows)
+                            # Nested array -> another table (recurse)
+                            nested_parent_ids = current_parent_ids.copy()
+                            nested_parent_ids[item_id_field] = item_id_value
+                            
+                            nested_rows = []
+                            for nested_item in v:
+                                nested_row = {}
+                                for pid_field, pid_value in nested_parent_ids.items():
+                                    nested_row[f"{k}_{pid_field}"] = pid_value
+                                
+                                for nk, nv in nested_item.items():
+                                    if isinstance(nv, list):
+                                        if nv and isinstance(nv[0], dict):
+                                            nested_row[nk] = json.dumps(nv)[:50] + "..."
+                                        else:
+                                            nested_row[nk] = "|".join(str(x) for x in nv)
+                                    elif isinstance(nv, dict):
+                                        for dk, dv in nv.items():
+                                            if not isinstance(dv, (dict, list)):
+                                                nested_row[f"{nk}.{dk}"] = dv
+                                    else:
+                                        nested_row[nk] = nv
+                                nested_rows.append(nested_row)
+                            
+                            if k not in tables:
+                                tables[k] = pd.DataFrame(nested_rows)
+                            
                         elif isinstance(v, list):
                             child_row[k] = "|".join(str(x) for x in v)
                         elif isinstance(v, dict):
@@ -314,16 +380,18 @@ class PreviewGenerator:
                                     child_row[f"{k}.{dk}"] = dv
                         else:
                             child_row[k] = v
+                    
                     child_rows.append(child_row)
-                tables[key] = pd.DataFrame(child_rows)
+                
+                if table_name not in tables:
+                    tables[table_name] = pd.DataFrame(child_rows)
+                    
             elif isinstance(value, list):
-                main_row[key] = "|".join(str(v) for v in value)
+                # Primitive array
+                main_row[full_key] = "|".join(str(v) for v in value)
             else:
-                main_row[key] = value
-        
-        # Insert main table first
-        tables = {"main": pd.DataFrame([main_row]), **tables}
-        return tables
+                # Scalar value - add to main
+                main_row[full_key] = value
     
     def _find_id_field(self, record: Dict) -> str:
         """Find the ID field in a record."""

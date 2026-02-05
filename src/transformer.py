@@ -7,8 +7,41 @@ import pandas as pd
 from typing import List, Dict, Optional
 import logging
 from tqdm import tqdm
+import threading
+import time
+import sys
 
 logger = logging.getLogger(__name__)
+
+
+class Spinner:
+    """Simple spinner for long-running operations."""
+    
+    def __init__(self, message: str = "Processing"):
+        self.message = message
+        self.running = False
+        self.thread = None
+        self.frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+        
+    def spin(self):
+        i = 0
+        while self.running:
+            sys.stdout.write(f"\r    ├─ {self.message} {self.frames[i % len(self.frames)]}")
+            sys.stdout.flush()
+            i += 1
+            time.sleep(0.1)
+    
+    def start(self):
+        self.running = True
+        self.thread = threading.Thread(target=self.spin)
+        self.thread.start()
+        
+    def stop(self, result_msg: str = "✓"):
+        self.running = False
+        if self.thread:
+            self.thread.join()
+        sys.stdout.write(f"\r    ├─ {self.message} {result_msg}          \n")
+        sys.stdout.flush()
 
 
 class DataTransformer:
@@ -51,17 +84,26 @@ class DataTransformer:
         transformed_df = df.copy()
         
         try:
-            print("    ├─ Removing duplicates...", end=" ", flush=True)
             # Drop duplicates if requested
             if drop_duplicates:
                 initial_count = len(transformed_df)
-                transformed_df = transformed_df.drop_duplicates()
-                duplicates_removed = initial_count - len(transformed_df)
-                print(f"✓ (removed {duplicates_removed})")
+                # Use spinner for large datasets
+                if initial_count > 10000:
+                    spinner = Spinner(f"Removing duplicates ({initial_count:,} rows)")
+                    spinner.start()
+                    transformed_df = transformed_df.drop_duplicates()
+                    duplicates_removed = initial_count - len(transformed_df)
+                    spinner.stop(f"✓ (removed {duplicates_removed:,})")
+                else:
+                    print(f"    ├─ Removing duplicates ({initial_count:,} rows)...", end=" ", flush=True)
+                    transformed_df = transformed_df.drop_duplicates()
+                    duplicates_removed = initial_count - len(transformed_df)
+                    print(f"✓ (removed {duplicates_removed})")
+                    
                 if duplicates_removed > 0:
                     logger.info(f"Removed {duplicates_removed} duplicate rows")
             else:
-                print("✓ (skipped)")
+                print("    ├─ Removing duplicates... ✓ (skipped)")
             
             # Drop rows with NaN in specified columns
             if drop_na_columns:

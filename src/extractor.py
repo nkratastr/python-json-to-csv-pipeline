@@ -108,6 +108,7 @@ class DataExtractor:
         """
         Extract data from large JSON file using streaming.
         Uses ijson if available, falls back to chunked reading.
+        Shows progress bar for user feedback.
         """
         try:
             import ijson
@@ -118,31 +119,82 @@ class DataExtractor:
             return self._extract_standard_json()
 
     def _extract_with_ijson(self) -> List[Dict]:
-        """Extract data using ijson streaming parser."""
+        """Extract data using ijson streaming parser with progress bar."""
         import ijson
         
+        # Try to import tqdm for progress bar
+        try:
+            from tqdm import tqdm
+            use_tqdm = True
+        except ImportError:
+            use_tqdm = False
+        
         records = []
-        logger.info("Using ijson streaming parser for large file")
+        file_size = os.path.getsize(self.input_path)
+        logger.info(f"Using ijson streaming parser for large file ({file_size / (1024*1024):.1f} MB)")
+        print(f"    Streaming large file ({file_size / (1024*1024):.1f} MB)...")
         
         with open(self.input_path, 'rb') as f:
+            # Create progress bar based on file size
+            if use_tqdm:
+                pbar = tqdm(
+                    total=file_size,
+                    unit='B',
+                    unit_scale=True,
+                    desc="    Reading",
+                    bar_format='{desc}: {percentage:3.0f}%|{bar:30}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]'
+                )
+            
+            record_count = 0
+            last_pos = 0
+            
             # Try to detect the JSON structure
             # First, try parsing as array items
             try:
                 for record in ijson.items(f, 'item'):
                     records.append(record)
+                    record_count += 1
+                    
+                    # Update progress bar
+                    if use_tqdm and record_count % 1000 == 0:
+                        current_pos = f.tell()
+                        pbar.update(current_pos - last_pos)
+                        last_pos = current_pos
+                        
             except Exception:
                 # If that fails, try common nested structures
                 f.seek(0)
+                if use_tqdm:
+                    pbar.reset()
+                    last_pos = 0
+                    
                 for key in ['data.item', 'records.item', 'results.item']:
                     try:
                         for record in ijson.items(f, key):
                             records.append(record)
+                            record_count += 1
+                            
+                            if use_tqdm and record_count % 1000 == 0:
+                                current_pos = f.tell()
+                                pbar.update(current_pos - last_pos)
+                                last_pos = current_pos
+                                
                         if records:
                             break
                         f.seek(0)
+                        if use_tqdm:
+                            pbar.reset()
+                            last_pos = 0
                     except Exception:
                         f.seek(0)
+                        if use_tqdm:
+                            pbar.reset()
+                            last_pos = 0
                         continue
+            
+            if use_tqdm:
+                pbar.update(file_size - last_pos)  # Complete the progress bar
+                pbar.close()
         
         if not records:
             # Fallback to standard extraction
@@ -150,7 +202,8 @@ class DataExtractor:
             return self._extract_standard_json()
         
         self.raw_data = records
-        logger.info(f"Streamed {len(self.raw_data)} records from large file")
+        logger.info(f"Streamed {len(self.raw_data):,} records from large file")
+        print(f"    Loaded {len(self.raw_data):,} records")
         return self.raw_data
 
     def _normalize_json_structure(self, data) -> List[Dict]:

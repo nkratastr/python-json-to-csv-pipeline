@@ -50,54 +50,51 @@ class DataTransformer:
         
         transformed_df = df.copy()
         
-        # Calculate total steps for progress bar
-        total_steps = 1  # Drop duplicates
-        if drop_na_columns:
-            total_steps += len(drop_na_columns)
-        if fillna_value:
-            total_steps += len(fillna_value)
-        string_columns = df.select_dtypes(include=['object']).columns
-        total_steps += len(string_columns)  # String cleaning
-        
         try:
-            with tqdm(total=total_steps, desc="Transforming", unit="step", 
-                      bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]") as pbar:
-                
-                # Drop duplicates if requested
-                if drop_duplicates:
-                    initial_count = len(transformed_df)
-                    transformed_df = transformed_df.drop_duplicates()
-                    duplicates_removed = initial_count - len(transformed_df)
-                    if duplicates_removed > 0:
-                        logger.info(f"Removed {duplicates_removed} duplicate rows")
-                pbar.update(1)
-                
-                # Drop rows with NaN in specified columns
-                if drop_na_columns:
-                    for col in drop_na_columns:
-                        if col in transformed_df.columns:
-                            initial_count = len(transformed_df)
-                            transformed_df = transformed_df.dropna(subset=[col])
-                            rows_dropped = initial_count - len(transformed_df)
-                            if rows_dropped > 0:
-                                logger.info(f"Removed {rows_dropped} rows with NaN in column '{col}'")
-                        pbar.update(1)
-                
-                # Fill NaN values
-                if fillna_value:
-                    for col, value in fillna_value.items():
-                        if col in transformed_df.columns:
-                            transformed_df[col].fillna(value, inplace=True)
-                            logger.debug(f"Filled NaN values in column '{col}' with '{value}'")
-                        pbar.update(1)
-                
-                # Clean string columns (strip whitespace)
-                string_columns = transformed_df.select_dtypes(include=['object']).columns
+            print("    ├─ Removing duplicates...", end=" ", flush=True)
+            # Drop duplicates if requested
+            if drop_duplicates:
+                initial_count = len(transformed_df)
+                transformed_df = transformed_df.drop_duplicates()
+                duplicates_removed = initial_count - len(transformed_df)
+                print(f"✓ (removed {duplicates_removed})")
+                if duplicates_removed > 0:
+                    logger.info(f"Removed {duplicates_removed} duplicate rows")
+            else:
+                print("✓ (skipped)")
+            
+            # Drop rows with NaN in specified columns
+            if drop_na_columns:
+                print("    ├─ Dropping NA rows...", end=" ", flush=True)
+                for col in drop_na_columns:
+                    if col in transformed_df.columns:
+                        initial_count = len(transformed_df)
+                        transformed_df = transformed_df.dropna(subset=[col])
+                        rows_dropped = initial_count - len(transformed_df)
+                        if rows_dropped > 0:
+                            logger.info(f"Removed {rows_dropped} rows with NaN in column '{col}'")
+                print("✓")
+            
+            # Fill NaN values
+            if fillna_value:
+                print("    ├─ Filling NA values...", end=" ", flush=True)
+                for col, value in fillna_value.items():
+                    if col in transformed_df.columns:
+                        transformed_df[col].fillna(value, inplace=True)
+                        logger.debug(f"Filled NaN values in column '{col}' with '{value}'")
+                print("✓")
+            
+            # Clean string columns (strip whitespace)
+            string_columns = transformed_df.select_dtypes(include=['object']).columns
+            if len(string_columns) > 0:
+                print(f"    └─ Cleaning {len(string_columns)} text columns...", end=" ", flush=True)
                 for col in string_columns:
                     transformed_df[col] = transformed_df[col].apply(
                         lambda x: x.strip() if isinstance(x, str) else x
                     )
-                    pbar.update(1)
+                print("✓")
+            else:
+                print("    └─ No text columns to clean ✓")
             
             logger.info(f"Transformation complete. Final shape: {transformed_df.shape}")
             self.transformed_data = transformed_df

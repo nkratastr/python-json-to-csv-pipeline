@@ -83,9 +83,8 @@ class RelationalConverter:
             parent_id_field: Parent's ID field name (for foreign key)
             parent_id_value: Parent's ID value
         """
-        # Find ID field for this record
-        id_field = self._find_id_field(record)
-        id_value = record.get(id_field, str(hash(str(record)))[:8])
+        # Find ID field for this record (look inside wrapper objects too)
+        id_field, id_value = self._find_id_recursive(record)
         
         # Build main row with flat fields
         row = {}
@@ -94,37 +93,83 @@ class RelationalConverter:
         if parent_id_field and parent_id_value is not None:
             row[parent_id_field] = parent_id_value
         
-        # Process each field
-        for key, value in record.items():
+        # Process each field - collect arrays for child tables
+        self._process_fields(record, row, table_name, id_field, id_value, prefix="")
+        
+        self.tables[table_name].append(row)
+    
+    def _process_fields(
+        self,
+        obj: Dict,
+        row: Dict,
+        table_name: str,
+        parent_id_field: str,
+        parent_id_value: Any,
+        prefix: str = ""
+    ) -> None:
+        """
+        Recursively process fields, extracting child tables from nested arrays.
+        """
+        for key, value in obj.items():
+            full_key = f"{prefix}{key}" if prefix else key
+            
             if isinstance(value, np.ndarray):
                 value = value.tolist()
             
             if isinstance(value, dict):
-                # Nested dict - flatten with dot notation
-                flat = self._flatten_dict(value, f"{key}.")
-                row.update(flat)
+                # Check if this dict contains arrays of objects
+                has_nested_arrays = any(
+                    isinstance(v, list) and v and isinstance(v[0], dict)
+                    for v in value.values()
+                )
+                
+                if has_nested_arrays:
+                    # Recurse into dict to find and extract arrays
+                    self._process_fields(
+                        value, row, table_name, parent_id_field, parent_id_value,
+                        prefix=full_key + "."
+                    )
+                else:
+                    # Simple nested dict - flatten with dot notation
+                    flat = self._flatten_dict(value, f"{full_key}.")
+                    row.update(flat)
                 
             elif isinstance(value, list) and value and isinstance(value[0], dict):
                 # Array of objects - create child table
                 child_table_name = key
-                child_id_field = f"{table_name}_{id_field}"
+                child_id_field = f"{table_name}_{parent_id_field}"
                 
                 for item in value:
                     self._process_record(
                         record=item,
                         table_name=child_table_name,
                         parent_id_field=child_id_field,
-                        parent_id_value=id_value
+                        parent_id_value=parent_id_value
                     )
                     
             elif isinstance(value, list):
                 # Array of primitives - pipe separated
-                row[key] = "|".join(str(v) for v in value) if value else ""
+                row[full_key] = "|".join(str(v) for v in value) if value else ""
                 
             else:
-                row[key] = value
+                row[full_key] = value
+    
+    def _find_id_recursive(self, record: Dict) -> Tuple[str, Any]:
+        """Find ID field, even if nested in wrapper object like 'employee'."""
+        # Check top level
+        id_field = self._find_id_field(record)
+        if id_field in record and not isinstance(record[id_field], dict):
+            return id_field, record.get(id_field, str(hash(str(record)))[:8])
         
-        self.tables[table_name].append(row)
+        # Check inside wrapper objects
+        for key, value in record.items():
+            if isinstance(value, dict):
+                nested_id = self._find_id_field(value)
+                if nested_id in value and not isinstance(value[nested_id], dict):
+                    return nested_id, value.get(nested_id, str(hash(str(record)))[:8])
+        
+        # Fallback
+        return "id", str(hash(str(record)))[:8]
     
     def _flatten_dict(self, d: Dict, prefix: str = "") -> Dict:
         """Flatten nested dictionary with dot notation."""

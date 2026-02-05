@@ -8,6 +8,8 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional, Union
 import logging
+from tqdm import tqdm
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -106,14 +108,43 @@ class DataLoader:
             # Construct full output path
             self.output_file = self.output_dir / filename
             
-            # Write to CSV
+            # Write to CSV with progress for large datasets
             logger.info(f"Writing DataFrame to: {self.output_file}")
-            df.to_csv(
-                self.output_file,
-                encoding=encoding,
-                index=index,
-                **csv_kwargs
-            )
+            total_rows = len(df)
+            
+            if total_rows > 50000:
+                # Chunked writing with progress bar for large files
+                chunk_size = 10000
+                print(f"    ├─ Writing {total_rows:,} rows to CSV")
+                
+                # Write header first
+                df.head(0).to_csv(self.output_file, encoding=encoding, index=index, **csv_kwargs)
+                
+                # Write data in chunks with progress
+                with tqdm(total=total_rows, desc="        Writing", 
+                          unit="rows", bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]") as pbar:
+                    for start in range(0, total_rows, chunk_size):
+                        end = min(start + chunk_size, total_rows)
+                        df.iloc[start:end].to_csv(
+                            self.output_file,
+                            mode='a',
+                            header=False,
+                            encoding=encoding,
+                            index=index,
+                            **csv_kwargs
+                        )
+                        pbar.update(end - start)
+                print("        ✓ Write complete")
+            else:
+                # Standard write for smaller files
+                print(f"    ├─ Writing {total_rows:,} rows...", end=" ", flush=True)
+                df.to_csv(
+                    self.output_file,
+                    encoding=encoding,
+                    index=index,
+                    **csv_kwargs
+                )
+                print("✓")
             
             # Verify file was created
             if not self.output_file.exists():

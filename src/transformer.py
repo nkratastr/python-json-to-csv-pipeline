@@ -1,11 +1,16 @@
 """
 Data Transformation Module
 Handles data cleaning and transformation - works with ANY JSON structure.
+Uses Polars for fast deduplication (10-100x faster than Pandas).
 """
 
 import pandas as pd
+import polars as pl
 from typing import List, Dict, Optional
 import logging
+from tqdm import tqdm
+import time
+import sys
 
 logger = logging.getLogger(__name__)
 
@@ -50,16 +55,30 @@ class DataTransformer:
         transformed_df = df.copy()
         
         try:
-            # Drop duplicates if requested
+            # Drop duplicates if requested - using Polars for speed
             if drop_duplicates:
                 initial_count = len(transformed_df)
-                transformed_df = transformed_df.drop_duplicates()
+                print(f"    ├─ Removing duplicates ({initial_count:,} rows)...", end=" ", flush=True)
+                
+                start_time = time.time()
+                
+                # Use Polars for fast deduplication (10-100x faster than Pandas)
+                pl_df = pl.from_pandas(transformed_df)
+                pl_unique = pl_df.unique()
+                transformed_df = pl_unique.to_pandas()
+                
+                elapsed = time.time() - start_time
                 duplicates_removed = initial_count - len(transformed_df)
+                print(f"✓ (removed {duplicates_removed:,} in {elapsed:.2f}s)")
+                    
                 if duplicates_removed > 0:
-                    logger.info(f"Removed {duplicates_removed} duplicate rows")
+                    logger.info(f"Removed {duplicates_removed} duplicate rows using Polars in {elapsed:.2f}s")
+            else:
+                print("    ├─ Removing duplicates... ✓ (skipped)")
             
             # Drop rows with NaN in specified columns
             if drop_na_columns:
+                print("    ├─ Dropping NA rows...", end=" ", flush=True)
                 for col in drop_na_columns:
                     if col in transformed_df.columns:
                         initial_count = len(transformed_df)
@@ -67,20 +86,28 @@ class DataTransformer:
                         rows_dropped = initial_count - len(transformed_df)
                         if rows_dropped > 0:
                             logger.info(f"Removed {rows_dropped} rows with NaN in column '{col}'")
+                print("✓")
             
             # Fill NaN values
             if fillna_value:
+                print("    ├─ Filling NA values...", end=" ", flush=True)
                 for col, value in fillna_value.items():
                     if col in transformed_df.columns:
                         transformed_df[col].fillna(value, inplace=True)
                         logger.debug(f"Filled NaN values in column '{col}' with '{value}'")
+                print("✓")
             
             # Clean string columns (strip whitespace)
             string_columns = transformed_df.select_dtypes(include=['object']).columns
-            for col in string_columns:
-                transformed_df[col] = transformed_df[col].apply(
-                    lambda x: x.strip() if isinstance(x, str) else x
-                )
+            if len(string_columns) > 0:
+                print(f"    └─ Cleaning {len(string_columns)} text columns...", end=" ", flush=True)
+                for col in string_columns:
+                    transformed_df[col] = transformed_df[col].apply(
+                        lambda x: x.strip() if isinstance(x, str) else x
+                    )
+                print("✓")
+            else:
+                print("    └─ No text columns to clean ✓")
             
             logger.info(f"Transformation complete. Final shape: {transformed_df.shape}")
             self.transformed_data = transformed_df

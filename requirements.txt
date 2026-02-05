@@ -2,6 +2,10 @@
 pandas==2.2.0
 pydantic==2.6.1
 pyyaml==6.0.1
+ijson==3.2.3  # For streaming large JSON files (500MB+)
+tqdm==4.66.1  # For progress bars
+polars==1.38.0  # For fast deduplication (10-100x faster than Pandas)
+pyarrow==23.0.0  # Required for Polars-Pandas conversion
 
 # Development Dependencies
 pytest==8.0.0

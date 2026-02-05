@@ -1,9 +1,11 @@
 """
 Main Pipeline Module
 Converts ANY JSON file to CSV automatically - no configuration needed.
+Includes progress bar and timing for each step.
 """
 
 import sys
+import time
 from pathlib import Path
 from typing import Optional, Dict
 import logging
@@ -17,6 +19,27 @@ from src.transformer import DataTransformer
 from src.loader import DataLoader
 from src.logger_config import get_logger_from_config, load_config
 
+# Try to import tqdm for progress bar
+try:
+    from tqdm import tqdm
+    TQDM_AVAILABLE = True
+except ImportError:
+    TQDM_AVAILABLE = False
+
+
+def format_duration(seconds: float) -> str:
+    """Format duration in human-readable format."""
+    if seconds < 60:
+        return f"{seconds:.2f}s"
+    elif seconds < 3600:
+        minutes = int(seconds // 60)
+        secs = seconds % 60
+        return f"{minutes}m {secs:.1f}s"
+    else:
+        hours = int(seconds // 3600)
+        minutes = int((seconds % 3600) // 60)
+        return f"{hours}h {minutes}m"
+
 
 class JSONToCSVPipeline:
     """
@@ -27,6 +50,10 @@ class JSONToCSVPipeline:
     - Extracts data to DataFrame
     - Cleans and transforms data
     - Outputs to CSV
+    
+    Features:
+    - Progress bar for each step
+    - Duration timing for monitoring
     
     Usage:
         pipeline = JSONToCSVPipeline("data/input/any_file.json")
@@ -60,10 +87,6 @@ class JSONToCSVPipeline:
             logging.basicConfig(level=logging.INFO)
             self.logger = logging.getLogger(__name__)
 
-        self.logger.info("=" * 70)
-        self.logger.info("JSON to CSV Pipeline - Starting")
-        self.logger.info("=" * 70)
-
         # Initialize components
         self.input_file = input_file
         self.output_dir = output_dir or self.config.get('paths', {}).get('output_dir', 'data/output')
@@ -71,9 +94,9 @@ class JSONToCSVPipeline:
         self.extractor = DataExtractor(input_file)
         self.transformer = DataTransformer()
         self.loader = DataLoader(self.output_dir)
-
-        self.logger.info(f"Input:  {input_file}")
-        self.logger.info(f"Output: {self.output_dir}")
+        
+        # Timing stats
+        self.timings: Dict[str, float] = {}
 
     def _get_default_config(self) -> Dict:
         """Default configuration if config file is not available."""
@@ -82,9 +105,16 @@ class JSONToCSVPipeline:
             'output': {'csv_encoding': 'utf-8', 'csv_index': False, 'timestamp_suffix': True}
         }
 
+    def _print_step(self, step: int, total: int, description: str, status: str = "running"):
+        """Print step status with visual indicator."""
+        icons = {"running": "⏳", "done": "✓", "error": "✗"}
+        icon = icons.get(status, "•")
+        print(f"\n[{step}/{total}] {icon} {description}")
+
     def run(self, output_filename: Optional[str] = None) -> Path:
         """
         Run the pipeline - converts JSON to CSV automatically.
+        Shows progress and timing for each step.
         
         Args:
             output_filename: Custom output filename (optional)
@@ -92,30 +122,54 @@ class JSONToCSVPipeline:
         Returns:
             Path to the created CSV file
         """
+        total_start = time.time()
+        
+        print("\n" + "=" * 60)
+        print("  JSON to CSV Pipeline")
+        print("=" * 60)
+        print(f"  Input:  {self.input_file}")
+        print(f"  Output: {self.output_dir}")
+        print("=" * 60)
+        
         try:
             self.logger.info("Pipeline execution started")
             
-            # EXTRACT - Read JSON file (any structure)
-            self.logger.info("Step 1/3: Extracting data from JSON")
+            # ===== STEP 1: EXTRACT =====
+            self._print_step(1, 3, "Extracting data from JSON...")
+            step_start = time.time()
+            
             df = self.extractor.extract_to_dataframe()
+            
+            step_duration = time.time() - step_start
+            self.timings['extract'] = step_duration
             
             if df.empty:
                 raise ValueError("No data found in JSON file")
             
-            self.logger.info(f"Extracted: {len(df)} records, {len(df.columns)} columns")
-            self.logger.info(f"Columns: {', '.join(df.columns.tolist())}")
+            print(f"    Records: {len(df):,} | Columns: {len(df.columns)}")
+            print(f"    Duration: {format_duration(step_duration)}")
+            self.logger.info(f"Extracted: {len(df)} records in {format_duration(step_duration)}")
             
-            # TRANSFORM - Clean data
-            self.logger.info("Step 2/3: Transforming data")
+            # ===== STEP 2: TRANSFORM =====
+            self._print_step(2, 3, "Transforming data...")
+            step_start = time.time()
+            
             transformed_df = self.transformer.transform_dataframe(df, drop_duplicates=True)
+            
+            step_duration = time.time() - step_start
+            self.timings['transform'] = step_duration
             
             if transformed_df.empty:
                 raise ValueError("No data after transformation")
             
-            self.logger.info(f"Transformed: {len(transformed_df)} records")
+            removed = len(df) - len(transformed_df)
+            print(f"    Records: {len(transformed_df):,} | Removed: {removed:,}")
+            print(f"    Duration: {format_duration(step_duration)}")
+            self.logger.info(f"Transformed: {len(transformed_df)} records in {format_duration(step_duration)}")
             
-            # LOAD - Write to CSV
-            self.logger.info("Step 3/3: Writing to CSV")
+            # ===== STEP 3: LOAD =====
+            self._print_step(3, 3, "Writing to CSV...")
+            step_start = time.time()
             
             output_config = self.config.get('output', {})
             output_path = self.loader.load_to_csv(
@@ -126,34 +180,51 @@ class JSONToCSVPipeline:
                 index=output_config.get('csv_index', False)
             )
             
-            # Summary
-            self._print_summary(df, transformed_df, output_path)
+            step_duration = time.time() - step_start
+            self.timings['load'] = step_duration
             
-            self.logger.info("=" * 70)
-            self.logger.info("Pipeline completed successfully!")
-            self.logger.info("=" * 70)
+            file_size = output_path.stat().st_size / 1024
+            print(f"    File: {output_path.name}")
+            print(f"    Size: {file_size:.2f} KB")
+            print(f"    Duration: {format_duration(step_duration)}")
+            self.logger.info(f"Loaded: {output_path} in {format_duration(step_duration)}")
+            
+            # ===== SUMMARY =====
+            total_duration = time.time() - total_start
+            self.timings['total'] = total_duration
+            
+            self._print_summary(df, transformed_df, output_path, total_duration)
+            
+            self.logger.info(f"Pipeline completed in {format_duration(total_duration)}")
             
             return output_path
             
         except Exception as e:
             self.logger.error(f"Pipeline failed: {str(e)}")
+            print(f"\n[ERROR] Pipeline failed: {str(e)}")
             raise
 
-    def _print_summary(self, original_df, final_df, output_path):
-        """Print pipeline execution summary."""
-        summary = f"""
-Pipeline Execution Summary:
----------------------------
-Input Records:      {len(original_df)}
-Output Records:     {len(final_df)}
-Records Filtered:   {len(original_df) - len(final_df)}
-Columns:            {len(final_df.columns)}
-Column Names:       {', '.join(final_df.columns.tolist())}
-Output File:        {output_path}
-File Size:          {output_path.stat().st_size / 1024:.2f} KB
-"""
-        self.logger.info(summary)
-        print(summary)
+    def _print_summary(self, original_df, final_df, output_path, total_duration: float = 0):
+        """Print pipeline execution summary with timing."""
+        print("\n" + "=" * 60)
+        print("  COMPLETED SUCCESSFULLY")
+        print("=" * 60)
+        print(f"""
+  Input Records:    {len(original_df):,}
+  Output Records:   {len(final_df):,}
+  Records Filtered: {len(original_df) - len(final_df):,}
+  Columns:          {len(final_df.columns)}
+  
+  Output File: {output_path}
+  File Size:   {output_path.stat().st_size / 1024:.2f} KB
+  
+  Timing:
+    - Extract:   {format_duration(self.timings.get('extract', 0))}
+    - Transform: {format_duration(self.timings.get('transform', 0))}
+    - Load:      {format_duration(self.timings.get('load', 0))}
+    - TOTAL:     {format_duration(total_duration)}
+""")
+        print("=" * 60)
 
 
 def main():

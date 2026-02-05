@@ -2,11 +2,13 @@
 
 A simple, production-ready Python pipeline that converts **any JSON file** to CSV format automatically.
 
-**No configuration needed** - just provide your JSON file and get a CSV!
+**No configuration needed** - just run it and enter your file path!
 
 ## Features
 
 - **Works with any JSON structure** - arrays, nested objects, single records
+- **Interactive mode** - just run and enter your file path
+- **Large file support** - handles files over 500MB with streaming
 - **Auto-detection** - automatically finds and extracts data from any JSON format
 - **Error handling** - robust try-catch blocks prevent crashes
 - **Logging** - all operations logged to file for debugging
@@ -30,10 +32,10 @@ pip install -r requirements.txt
 
 ### 2. Convert JSON to CSV
 
-**Option A: Simple Runner**
+**Option A: Interactive Mode (Recommended)**
 ```bash
-# Edit INPUT_FILE in run_pipeline.py, then:
 python run_pipeline.py
+# Then enter the path to your JSON file when prompted
 ```
 
 **Option B: Command Line**
@@ -113,6 +115,15 @@ Output File:        data/output/output_20260205_162530.csv
 File Size:          0.45 KB
 ```
 
+## Large File Support
+
+For JSON files larger than 500MB, the pipeline automatically uses streaming (ijson library) to process the file without loading it entirely into memory.
+
+| File Size | Processing Method |
+|-----------|------------------|
+| < 500 MB | Standard (fast) |
+| > 500 MB | Streaming (memory efficient) |
+
 ## Logging
 
 All operations are logged to `logs/pipeline.log`:
@@ -132,7 +143,7 @@ All operations are logged to `logs/pipeline.log`:
 - Python 3.10+
 - pandas
 - pyyaml
-- pydantic (optional, for validation)
+- ijson (for large files)
 
 ## Author
 

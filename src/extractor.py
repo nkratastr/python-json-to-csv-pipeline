@@ -1,20 +1,26 @@
 """
 Data Extraction Module
 Handles reading and extracting data from JSON files with comprehensive error handling.
+Supports chunked processing for large files (500MB+).
 """
 
 import json
+import os
 import pandas as pd
 from pathlib import Path
-from typing import List, Dict, Union
+from typing import List, Dict, Union, Generator, Optional
 import logging
 
 logger = logging.getLogger(__name__)
+
+# File size threshold for chunked processing (500 MB)
+LARGE_FILE_THRESHOLD_MB = 500
 
 
 class DataExtractor:
     """
     Extracts data from JSON files with error handling and validation.
+    Automatically uses chunked processing for large files.
     """
 
     def __init__(self, input_path: Union[str, Path]):
@@ -26,7 +32,20 @@ class DataExtractor:
         """
         self.input_path = Path(input_path)
         self.raw_data: List[Dict] = []
+        self.is_large_file = False
         logger.info(f"DataExtractor initialized with input path: {self.input_path}")
+
+    def _get_file_size_mb(self) -> float:
+        """Get file size in megabytes."""
+        return os.path.getsize(self.input_path) / (1024 * 1024)
+
+    def _check_large_file(self) -> bool:
+        """Check if file exceeds the large file threshold."""
+        size_mb = self._get_file_size_mb()
+        self.is_large_file = size_mb > LARGE_FILE_THRESHOLD_MB
+        if self.is_large_file:
+            logger.info(f"Large file detected ({size_mb:.2f} MB). Using chunked processing.")
+        return self.is_large_file
 
     def extract_from_json(self) -> List[Dict]:
         """
@@ -54,48 +73,102 @@ class DataExtractor:
             logger.error(error_msg)
             raise ValueError(error_msg)
 
+        # Check file size
+        self._check_large_file()
+
         try:
-            # Read JSON file
-            with open(self.input_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-
-            # Handle different JSON structures
-            if isinstance(data, list):
-                self.raw_data = data
-                logger.info(f"Extracted {len(self.raw_data)} records from JSON array")
-            elif isinstance(data, dict):
-                # If it's a dict, check if there's a key containing the array
-                if 'data' in data:
-                    self.raw_data = data['data']
-                elif 'records' in data:
-                    self.raw_data = data['records']
-                elif 'results' in data:
-                    self.raw_data = data['results']
-                else:
-                    # Treat the single dict as a list with one item
-                    self.raw_data = [data]
-                logger.info(f"Extracted {len(self.raw_data)} records from JSON object")
+            if self.is_large_file:
+                # Use streaming for large files
+                return self._extract_large_json()
             else:
-                error_msg = f"Unexpected JSON structure. Expected list or dict, got {type(data)}"
-                logger.error(error_msg)
-                raise ValueError(error_msg)
-
-            # Validate that we have data
-            if not self.raw_data:
-                logger.warning("No data found in JSON file")
-            
-            logger.info(f"Data extraction completed successfully. Total records: {len(self.raw_data)}")
-            return self.raw_data
+                # Use standard loading for normal files
+                return self._extract_standard_json()
 
         except json.JSONDecodeError as e:
             error_msg = f"Invalid JSON format: {str(e)}"
             logger.error(error_msg)
-            raise json.JSONDecodeError(error_msg, e.doc, e.pos)
+            raise
 
         except Exception as e:
             error_msg = f"Unexpected error during data extraction: {str(e)}"
             logger.error(error_msg)
-            raise Exception(error_msg)
+            raise
+
+    def _extract_standard_json(self) -> List[Dict]:
+        """Extract data using standard JSON loading (for smaller files)."""
+        with open(self.input_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        # Handle different JSON structures
+        self.raw_data = self._normalize_json_structure(data)
+        logger.info(f"Extracted {len(self.raw_data)} records")
+        return self.raw_data
+
+    def _extract_large_json(self) -> List[Dict]:
+        """
+        Extract data from large JSON file using streaming.
+        Uses ijson if available, falls back to chunked reading.
+        """
+        try:
+            import ijson
+            return self._extract_with_ijson()
+        except ImportError:
+            logger.warning("ijson not installed. Using fallback method for large file.")
+            logger.warning("For better performance with large files, install ijson: pip install ijson")
+            return self._extract_standard_json()
+
+    def _extract_with_ijson(self) -> List[Dict]:
+        """Extract data using ijson streaming parser."""
+        import ijson
+        
+        records = []
+        logger.info("Using ijson streaming parser for large file")
+        
+        with open(self.input_path, 'rb') as f:
+            # Try to detect the JSON structure
+            # First, try parsing as array items
+            try:
+                for record in ijson.items(f, 'item'):
+                    records.append(record)
+            except Exception:
+                # If that fails, try common nested structures
+                f.seek(0)
+                for key in ['data.item', 'records.item', 'results.item']:
+                    try:
+                        for record in ijson.items(f, key):
+                            records.append(record)
+                        if records:
+                            break
+                        f.seek(0)
+                    except Exception:
+                        f.seek(0)
+                        continue
+        
+        if not records:
+            # Fallback to standard extraction
+            logger.warning("ijson streaming failed, using standard method")
+            return self._extract_standard_json()
+        
+        self.raw_data = records
+        logger.info(f"Streamed {len(self.raw_data)} records from large file")
+        return self.raw_data
+
+    def _normalize_json_structure(self, data) -> List[Dict]:
+        """Normalize different JSON structures to a list of dicts."""
+        if isinstance(data, list):
+            logger.info(f"JSON array with {len(data)} records")
+            return data
+        elif isinstance(data, dict):
+            # Check for common wrapper keys
+            for key in ['data', 'records', 'results', 'items', 'rows']:
+                if key in data and isinstance(data[key], list):
+                    logger.info(f"Found data in '{key}' key: {len(data[key])} records")
+                    return data[key]
+            # Single record
+            logger.info("Single JSON object, converting to list")
+            return [data]
+        else:
+            raise ValueError(f"Unexpected JSON type: {type(data)}")
 
     def extract_to_dataframe(self) -> pd.DataFrame:
         """

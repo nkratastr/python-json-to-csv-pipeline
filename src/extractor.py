@@ -223,14 +223,76 @@ class DataExtractor:
         else:
             raise ValueError(f"Unexpected JSON type: {type(data)}")
 
+    def _convert_arrays_to_strings(self, data: List[Dict]) -> List[Dict]:
+        """
+        Pre-process data to convert arrays to CSV-friendly strings.
+        
+        - Arrays of primitives (strings, numbers) → pipe-separated string
+        - Arrays of objects → JSON string
+        
+        This ensures clean CSV output without numpy array representations.
+        """
+        import numpy as np
+        
+        def process_value(value):
+            """Recursively process a value."""
+            if value is None:
+                return None
+            
+            # Handle numpy arrays
+            if isinstance(value, np.ndarray):
+                value = value.tolist()
+            
+            # Handle lists/arrays
+            if isinstance(value, list):
+                if not value:  # Empty list
+                    return ""
+                
+                # Check first element type
+                first_item = value[0]
+                
+                # Array of primitives → pipe-separated
+                if isinstance(first_item, (str, int, float, bool)):
+                    return "|".join(str(v) for v in value)
+                
+                # Array of dicts/objects → JSON string
+                elif isinstance(first_item, dict):
+                    return json.dumps(value, ensure_ascii=False)
+                
+                # Nested arrays → JSON string
+                else:
+                    return json.dumps(value, ensure_ascii=False)
+            
+            # Handle nested dicts (will be flattened by json_normalize)
+            elif isinstance(value, dict):
+                # Process nested values
+                return {k: process_value(v) for k, v in value.items()}
+            
+            return value
+        
+        processed_data = []
+        for record in data:
+            processed_record = {}
+            for key, value in record.items():
+                processed_record[key] = process_value(value)
+            processed_data.append(processed_record)
+        
+        return processed_data
+
     def extract_to_dataframe(self) -> pd.DataFrame:
         """
         Extract data and convert to pandas DataFrame.
         
+        Best Practice Hybrid Approach:
+        1. Nested dicts → flattened with dot notation (department.manager.contact.email)
+        2. Arrays of objects → JSON string (preserves data, can be parsed later)
+        3. Arrays of primitives → pipe-separated string (CSV-friendly)
+        4. Uses Polars for fast deduplication in transformer (10x faster)
+        
         Returns:
-            pandas DataFrame containing the extracted data
+            pandas DataFrame containing the extracted data with flattened columns
         """
-        logger.info("Extracting data to DataFrame")
+        logger.info("Extracting data to DataFrame with hybrid flatten approach")
         
         try:
             data = self.extract_from_json()
@@ -239,8 +301,18 @@ class DataExtractor:
                 logger.warning("No data to convert to DataFrame")
                 return pd.DataFrame()
             
-            df = pd.DataFrame(data)
+            # Step 1: Pre-process arrays to strings (before json_normalize)
+            # This prevents numpy array representations in output
+            processed_data = self._convert_arrays_to_strings(data)
+            logger.debug("Pre-processed arrays to CSV-friendly strings")
+            
+            # Step 2: Use json_normalize to flatten nested dicts
+            # This converts {"department": {"id": "D001", "manager": {"name": "John"}}}
+            # into columns: "department.id", "department.manager.name"
+            df = pd.json_normalize(processed_data, sep='.')
+            
             logger.info(f"Created DataFrame with shape: {df.shape}")
+            logger.info(f"Columns after flattening: {len(df.columns)}")
             logger.debug(f"DataFrame columns: {df.columns.tolist()}")
             
             return df

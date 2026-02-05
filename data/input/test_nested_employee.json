@@ -1,0 +1,74 @@
+[
+  {
+    "id": "E93838",
+    "name": "Douglas Jordan",
+    "position": "Research scientist",
+    "department": {
+      "id": "D087",
+      "name": "Whiteboard",
+      "manager": {
+        "id": "M4293",
+        "name": "Cameron Roach",
+        "contact": {
+          "email": "cameron@example.com",
+          "phone": "759-367-1799"
+        }
+      }
+    },
+    "projects": [
+      {
+        "projectId": "P1906",
+        "projectName": "Organic adapter",
+        "startDate": "2025-05-31",
+        "tasks": [
+          {
+            "taskId": "T983",
+            "title": "Build API",
+            "status": "Completed",
+            "details": {
+              "hoursSpent": 60,
+              "completionDate": "2025-08-26",
+              "technologiesUsed": ["Pandas", "TensorFlow", "SQL"]
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "E136765",
+    "name": "Gary Brown",
+    "position": "Administrator",
+    "department": {
+      "id": "D091",
+      "name": "Evolve",
+      "manager": {
+        "id": "M9229",
+        "name": "Patrick Smith",
+        "contact": {
+          "email": "patrick@example.org",
+          "phone": "001-783-376-3297"
+        }
+      }
+    },
+    "projects": [
+      {
+        "projectId": "P1076",
+        "projectName": "Moratorium project",
+        "startDate": "2025-05-28",
+        "tasks": [
+          {
+            "taskId": "T733",
+            "title": "Implement features",
+            "status": "In Progress",
+            "details": {
+              "hoursSpent": 71,
+              "expectedCompletion": "2025-08-23",
+              "technologiesUsed": ["Python", "Java"]
+            }
+          }
+        ]
+      }
+    ]
+  }
+]

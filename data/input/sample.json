@@ -1,0 +1,52 @@
+[
+  {
+    "id": 1,
+    "name": "John Doe",
+    "email": "john.doe@example.com",
+    "age": 30,
+    "city": "New York",
+    "country": "USA",
+    "registration_date": "2024-01-15",
+    "is_active": true
+  },
+  {
+    "id": 2,
+    "name": "Jane Smith",
+    "email": "jane.smith@example.com",
+    "age": 28,
+    "city": "London",
+    "country": "UK",
+    "registration_date": "2024-02-20",
+    "is_active": true
+  },
+  {
+    "id": 3,
+    "name": "Ali Yılmaz",
+    "email": "ali.yilmaz@example.com",
+    "age": 35,
+    "city": "Istanbul",
+    "country": "Turkey",
+    "registration_date": "2024-03-10",
+    "is_active": false
+  },
+  {
+    "id": 4,
+    "name": "Maria Garcia",
+    "email": "maria.garcia@example.com",
+    "age": 42,
+    "city": "Madrid",
+    "country": "Spain",
+    "registration_date": "2024-01-25",
+    "is_active": true
+  },
+  {
+    "id": 5,
+    "name": "Chen Wei",
+    "email": "chen.wei@example.com",
+    "age": 26,
+    "city": "Beijing",
+    "country": "China",
+    "registration_date": "2024-04-05",
+    "is_active": true
+  }
+]

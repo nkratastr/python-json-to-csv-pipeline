@@ -17,7 +17,9 @@ class ModePreview:
     mode_id: int
     name: str
     description: str
+    detail_description: str  # More detailed explanation
     output_files: int
+    output_file_names: List[str]  # Actual CSV file names
     estimated_rows: int
     sample_table: str  # ASCII table preview
     pros: List[str]
@@ -86,12 +88,19 @@ class PreviewGenerator:
         return ModePreview(
             mode_id=1,
             name="FLAT",
-            description="Arrays stored as JSON strings",
+            description="Single CSV - Arrays as JSON text",
+            detail_description=(
+                "All data in ONE file. Nested arrays (like projects, tasks) are stored as\n"
+                "      JSON text in a single column. Simple objects are flattened with dot notation.\n"
+                "      Example: department.name, department.manager.email\n"
+                "      Arrays: [{\"projectId\": \"P001\", ...}] (as text)"
+            ),
             output_files=1,
+            output_file_names=["output.csv"],
             estimated_rows=self.analysis.record_count,
             sample_table=self._df_to_ascii(sample_df, max_cols=4),
-            pros=["Simple, single file", "No data loss", "Fast processing"],
-            cons=["Nested data needs parsing", "Hard to filter by nested fields"]
+            pros=["Single file, easy to manage", "Original data preserved", "1 row = 1 record"],
+            cons=["Arrays need JSON parsing to use", "Cannot filter/sort by nested values"]
         )
     
     def _generate_explode_preview(self) -> ModePreview:
@@ -102,18 +111,28 @@ class PreviewGenerator:
         return ModePreview(
             mode_id=2,
             name="EXPLODE",
-            description="One row per deepest nested item",
+            description="Single CSV - One row per nested item",
+            detail_description=(
+                "All data in ONE file. Each nested item becomes a SEPARATE ROW.\n"
+                "      Parent data (name, department) is DUPLICATED for each nested item.\n"
+                "      Example: If employee has 3 projects with 2 tasks each = 6 rows\n"
+                "      All columns are flat - easy to filter/sort/pivot in Excel"
+            ),
             output_files=1,
+            output_file_names=["output.csv"],
             estimated_rows=self.analysis.estimated_exploded_rows,
             sample_table=self._df_to_ascii(sample_df, max_cols=5),
-            pros=["Fully flat, easy to filter", "Works with Excel/SQL directly"],
-            cons=["Data duplication", "Larger file size"]
+            pros=["100% flat - works directly in Excel/SQL", "Can filter by ANY field", "Pivot table ready"],
+            cons=["Data duplication (larger file)", f"~{self.analysis.estimated_exploded_rows:,} rows from {self.analysis.record_count:,} records"]
         )
     
     def _generate_relational_preview(self) -> ModePreview:
         """Generate preview for RELATIONAL mode."""
         # Create sample relational output
         tables = self._create_relational_sample()
+        
+        # Get file names with row counts
+        file_names = [f"{name}.csv" for name in tables.keys()]
         
         # Build combined preview
         preview_parts = []
@@ -122,15 +141,25 @@ class PreviewGenerator:
             preview_parts.append(self._df_to_ascii(df, max_cols=4, indent=4))
             preview_parts.append("")
         
+        # Create file list description
+        file_info = ", ".join(file_names)
+        
         return ModePreview(
             mode_id=3,
             name="RELATIONAL",
-            description="Separate linked CSV files",
+            description=f"Multiple CSVs - {len(tables)} linked files",
+            detail_description=(
+                f"Data split into {len(tables)} SEPARATE CSV files (like database tables).\n"
+                f"      Files: {file_info}\n"
+                "      Tables are linked by ID columns (main_id, projects_projectId, etc.)\n"
+                "      NO duplication - clean normalized data, joinable in SQL/Excel"
+            ),
             output_files=len(tables),
+            output_file_names=file_names,
             estimated_rows=self.analysis.record_count,  # Main table rows
             sample_table="\n".join(preview_parts),
-            pros=["Clean normalized data", "No duplication", "Database ready"],
-            cons=["Multiple files to manage", "Need JOINs for full view"]
+            pros=["No data duplication", "Clean normalized structure", "Database/SQL ready"],
+            cons=[f"{len(tables)} files to manage", "Need VLOOKUP/JOIN for full view"]
         )
     
     def _create_flat_sample(self) -> pd.DataFrame:
@@ -348,11 +377,20 @@ class PreviewGenerator:
         if not self.analysis.has_array_of_objects:
             return self._generate_flat_only_message()
         
+        # Get nested array names for context
+        array_names = [arr.name for arr in self.analysis.nested_arrays]
+        array_info = ", ".join(array_names[:3])
+        if len(array_names) > 3:
+            array_info += f" (+{len(array_names) - 3} more)"
+        
         lines = [
             "",
-            "  " + "!" * 50,
-            "  NESTED ARRAYS DETECTED - Choose conversion mode:",
-            "  " + "!" * 50,
+            "  " + "#" * 60,
+            "  NESTED ARRAYS DETECTED",
+            "  " + "#" * 60,
+            f"  Arrays found: {array_info}",
+            "",
+            "  How would you like to handle nested data?",
             "",
         ]
         
@@ -362,9 +400,9 @@ class PreviewGenerator:
             lines.append("")
         
         lines.extend([
-            "-" * 65,
+            "  " + "=" * 60,
             "",
-            "  Select mode [1/2/3] or 'q' to quit: ",
+            "  Enter your choice [1/2/3] or 'q' to quit: ",
         ])
         
         return "\n".join(lines)
@@ -381,14 +419,29 @@ class PreviewGenerator:
     def _format_mode_option(self, preview: ModePreview) -> List[str]:
         """Format a single mode option for display."""
         lines = [
+            "  " + "=" * 60,
             f"  [{preview.mode_id}] {preview.name} - {preview.description}",
-            f"      Output: {preview.output_files} file(s), ~{preview.estimated_rows:,} rows",
+            "  " + "-" * 60,
+            f"      {preview.detail_description}",
             "",
-            preview.sample_table,
-            "",
-            f"      + {', '.join(preview.pros)}",
-            f"      - {', '.join(preview.cons)}",
         ]
+        
+        # Show output files for relational mode
+        if preview.output_files > 1:
+            lines.append(f"      OUTPUT FILES ({preview.output_files}):")
+            for fname in preview.output_file_names:
+                lines.append(f"        - {fname}")
+            lines.append("")
+        else:
+            lines.append(f"      OUTPUT: {preview.output_file_names[0]} (~{preview.estimated_rows:,} rows)")
+            lines.append("")
+        
+        lines.append("      SAMPLE:")
+        lines.append(preview.sample_table)
+        lines.append("")
+        lines.append(f"      [+] {' | '.join(preview.pros)}")
+        lines.append(f"      [-] {' | '.join(preview.cons)}")
+        
         return lines
     
     def display_full_preview(self) -> str:
